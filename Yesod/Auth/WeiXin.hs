@@ -41,6 +41,10 @@ class (YesodAuth site) => YesodAuthWeiXin site where
   wxAuthConfigOutsideWX :: HandlerT site IO WxppAuthConfig
 
 
+-- | 使用微信 union id 机制作为身份认证
+-- 为同时支持微信内、外访问网页，网站必须设置使用 union id，
+-- 而不仅是 open id
+-- 最后生成的 Creds 中的 ident 部分就是一个 union id
 authWeixin :: forall m. YesodAuthWeiXin m => AuthPlugin m
 authWeixin =
   AuthPlugin wxAuthPluginName dispatch loginWidget
@@ -66,9 +70,14 @@ authWeixin =
       let app_id = wxppAuthAppID auth_config
       state <- wxppOAuthMakeRandomState app_id
       let auth_url = mk_url app_id callback_url state
-      redirect auth_url
+      [whamlet|
+        <p>
+          <a href="#{unUrlText auth_url}">点击这里使用微信身份登录
+      |]
 
 
+-- | 为方便测试做的假微信登录
+-- 用户可以输入任意字串作为 union id 登录
 authWeixinDummy :: (YesodAuth m, RenderMessage m FormMessage) => AuthPlugin m
 authWeixinDummy =
   AuthPlugin wxAuthDummyPluginName dispatch loginWidget
@@ -82,15 +91,7 @@ authWeixinDummy =
         <form method="post" action="@{toMaster loginDummyR}">
           <table>
             <tr>
-              <th>App Id
-              <td>
-                 <input type="text" name="app_id" required>
-            <tr>
-              <th>Open Id
-              <td>
-                 <input type="text" name="open_id" required>
-            <tr>
-              <th>union Id
+              <th>Union Id
               <td>
                  <input type="text" name="union_id" required>
             <tr>
@@ -138,10 +139,8 @@ getLoginCallbackReal auth_config = do
 
                             Right x -> return x
 
-            let open_id = oauthAtkOpenID atk_info
-                m_union_id = oauthAtkUnionID atk_info
+            let m_union_id = oauthAtkUnionID atk_info
 
-            sessionMarkWxppUser app_id open_id m_union_id
             ident <- case m_union_id of
                       Nothing -> do
                         $logErrorS logSource "No Union Id available"
@@ -157,15 +156,6 @@ getLoginCallbackReal auth_config = do
 postLoginDummyR :: (YesodAuth master, RenderMessage master FormMessage)
                   => HandlerT Auth (HandlerT master IO) TypedContent
 postLoginDummyR = do
-  (app_id0, open_id0, m_union_id0) <- lift $ runInputPost $ do
-                          (,,) <$> ireq textField "app_id"
-                              <*> ireq textField "open_id"
-                              <*> iopt textField "union_id"
-  let open_id = WxppOpenID open_id0
-      app_id = WxppAppID app_id0
-      m_union_id = WxppUnionID <$> m_union_id0
-
-  sessionMarkWxppUser app_id open_id m_union_id
-
-  foundation <- lift getYesod
-  lift $ redirectUltDest (loginDest foundation)
+  union_id0 <- lift $ runInputPost $ do
+                              ireq textField "union_id"
+  lift $ setCredsRedirect (Creds wxAuthDummyPluginName union_id0 [])
