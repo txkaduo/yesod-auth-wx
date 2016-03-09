@@ -56,7 +56,7 @@ authWeixin =
   AuthPlugin wxAuthPluginName dispatch loginWidget
   where
     dispatch "POST" ["wxcb", "out" ]  = getLoginCallbackOutR >>= sendResponse
-    dispatch "POST" ["wxcb", "in" ]   = getLoginCallbackInR >>= sendResponse
+    dispatch "GET" ["wxcb", "in" ]   = getLoginCallbackInR >>= sendResponse
     dispatch _ _ = notFound
 
     loginWidget :: (Route Auth -> Route m) -> WidgetT m IO ()
