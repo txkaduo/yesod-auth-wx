@@ -40,6 +40,12 @@ class (YesodAuth site) => YesodAuthWeiXin site where
   -- 用于普通浏览器内打开网页时的认证
   wxAuthConfigOutsideWX :: HandlerT site IO WxppAuthConfig
 
+  -- | 由于微信限制了oauth重定向的返回地址只能用一个固定的域名
+  -- 实用时,有多个域名的情况下,通常要做一个固定域名服务器中转一下
+  -- 这个方法负责从原始应该使用的地址转换成另一个中转地址
+  wxAuthConfigFixReturnUrl :: UrlText -> HandlerT site IO UrlText
+  wxAuthConfigFixReturnUrl = return
+
 
 -- | 使用微信 union id 机制作为身份认证
 -- 为同时支持微信内、外访问网页，网站必须设置使用 union id，
@@ -66,7 +72,8 @@ authWeixin =
                 (, wxppOAuthRequestAuthOutsideWx, loginCallbackOutR)
                     <$> handlerToWidget wxAuthConfigOutsideWX
       render_url <- getUrlRender
-      let callback_url = UrlText $ render_url (toMaster cb_route)
+      callback_url <- handlerToWidget $ wxAuthConfigFixReturnUrl $
+                                          UrlText $ render_url (toMaster cb_route)
       let app_id = wxppAuthAppID auth_config
       state <- wxppOAuthMakeRandomState app_id
       let auth_url = mk_url app_id callback_url state
