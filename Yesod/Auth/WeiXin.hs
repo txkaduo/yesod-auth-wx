@@ -7,10 +7,11 @@ module Yesod.Auth.WeiXin
   , authWeixinDummy
   ) where
 
-import ClassyPrelude.Yesod
-import Yesod.Core.Types                     (HandlerContents(HCError))
-import Yesod.Auth
-import qualified Yesod.Auth.Message as Msg
+import           ClassyPrelude.Yesod
+import qualified Network.Wreq.Session        as WS
+import           Yesod.Auth
+import qualified Yesod.Auth.Message          as Msg
+import           Yesod.Core.Types            (HandlerContents (HCError))
 
 import WeiXin.PublicPlatform
 
@@ -45,6 +46,8 @@ class (YesodAuth site) => YesodAuthWeiXin site where
   -- 这个方法负责从原始应该使用的地址转换成另一个中转地址
   wxAuthConfigFixReturnUrl :: UrlText -> HandlerT site IO UrlText
   wxAuthConfigFixReturnUrl = return
+
+  wxAuthConfigWreqSession :: HandlerT site IO WS.Session
 
 
 -- | 使用微信 union id 机制作为身份认证
@@ -137,7 +140,10 @@ getLoginCallbackReal auth_config = do
     case fmap OAuthCode m_code of
         Just code | not (null $ unOAuthCode code) -> do
             -- 用户同意授权
-            err_or_atk_info <- tryWxppWsResult $ wxppOAuthGetAccessToken app_id secret code
+            sess <- lift wxAuthConfigWreqSession
+            err_or_atk_info <- tryWxppWsResult $
+                                  flip runReaderT sess $
+                                    wxppOAuthGetAccessToken app_id secret code
             atk_info <- case err_or_atk_info of
                             Left err -> do
                                 $logErrorS logSource $
