@@ -126,7 +126,7 @@ getLoginCallbackReal :: YesodAuthWeiXin master
                     => WxppAuthConfig
                     -> HandlerT Auth (HandlerT master IO) TypedContent
 getLoginCallbackReal auth_config = do
-    m_code <- lookupGetParam "code"
+    m_code <- fmap OAuthCode <$> lookupGetParam "code"
     let app_id = wxppAuthAppID auth_config
         secret = wxppAuthAppSecret auth_config
 
@@ -137,8 +137,8 @@ getLoginCallbackReal auth_config = do
             "OAuth state check failed, got: " <> oauth_state
         permissionDenied "Invalid State"
 
-    case fmap OAuthCode m_code of
-        Just code | not (null $ unOAuthCode code) -> do
+    case m_code of
+        Just code | not (deniedOAuthCode code) -> do
             -- 用户同意授权
             sess <- lift wxAuthConfigWreqSession
             err_or_atk_info <- tryWxppWsResult $
