@@ -30,7 +30,7 @@ library
                      , yesod-core
                      , classy-prelude-yesod
                      , wreq
-                     , weixin-mp-sdk    >= 0.21.2
+                     , weixin-mp-sdk    >= 0.22
 
   ghc-options:         -Wall
 

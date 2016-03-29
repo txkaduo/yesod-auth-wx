@@ -47,7 +47,7 @@ class (YesodAuth site) => YesodAuthWeiXin site where
   wxAuthConfigFixReturnUrl :: UrlText -> HandlerT site IO UrlText
   wxAuthConfigFixReturnUrl = return
 
-  wxAuthConfigWreqSession :: HandlerT site IO WS.Session
+  wxAuthConfigApiEnv :: HandlerT site IO WxppApiEnv
 
 
 -- | 使用微信 union id 机制作为身份认证
@@ -140,9 +140,9 @@ getLoginCallbackReal auth_config = do
     case m_code of
         Just code | not (deniedOAuthCode code) -> do
             -- 用户同意授权
-            sess <- lift wxAuthConfigWreqSession
+            wx_api_env <- lift wxAuthConfigApiEnv
             err_or_atk_info <- tryWxppWsResult $
-                                  flip runReaderT sess $
+                                  flip runReaderT wx_api_env $
                                     wxppOAuthGetAccessToken app_id secret code
             atk_info <- case err_or_atk_info of
                             Left err -> do
