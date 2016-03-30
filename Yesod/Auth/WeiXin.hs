@@ -58,7 +58,7 @@ authWeixin :: forall m. YesodAuthWeiXin m => AuthPlugin m
 authWeixin =
   AuthPlugin wxAuthPluginName dispatch loginWidget
   where
-    dispatch "POST" ["wxcb", "out" ]  = getLoginCallbackOutR >>= sendResponse
+    dispatch "GET" ["wxcb", "out" ]  = getLoginCallbackOutR >>= sendResponse
     dispatch "GET" ["wxcb", "in" ]   = getLoginCallbackInR >>= sendResponse
     dispatch _ _ = notFound
 
