@@ -17,6 +17,8 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Yesod.Auth.WeiXin
+                       Yesod.Auth.WeiXin.Class
+
   -- other-modules:       
   default-extensions:  NoImplicitPrelude
                        TemplateHaskell
@@ -30,7 +32,7 @@ library
                      , yesod-core
                      , classy-prelude-yesod
                      , wreq
-                     , weixin-mp-sdk    >= 0.22
+                     , weixin-mp-sdk    >= 0.23
 
   ghc-options:         -Wall
 

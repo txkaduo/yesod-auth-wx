@@ -5,15 +5,18 @@ module Yesod.Auth.WeiXin
   , YesodAuthWeiXin(..)
   , authWeixin
   , authWeixinDummy
+  , module Yesod.Auth.WeiXin.Class
   ) where
 
 import           ClassyPrelude.Yesod
-import qualified Network.Wreq.Session        as WS
 import           Yesod.Auth
 import qualified Yesod.Auth.Message          as Msg
 import           Yesod.Core.Types            (HandlerContents (HCError))
 
 import WeiXin.PublicPlatform
+
+import Yesod.Auth.WeiXin.Class
+
 
 wxAuthPluginName :: Text
 wxAuthPluginName = "weixin"
@@ -31,25 +34,6 @@ loginDummyR :: AuthRoute
 loginDummyR = PluginR wxAuthDummyPluginName ["login"]
 
 
-class (YesodAuth site) => YesodAuthWeiXin site where
-
-  -- | The config for OAuth wthin WeiXin client
-  -- 用于微信客户端内打开网页时的认证
-  wxAuthConfigInsideWX :: HandlerT site IO WxppAuthConfig
-
-  -- | The config for OAuth outside WeiXin client
-  -- 用于普通浏览器内打开网页时的认证
-  wxAuthConfigOutsideWX :: HandlerT site IO WxppAuthConfig
-
-  -- | 由于微信限制了oauth重定向的返回地址只能用一个固定的域名
-  -- 实用时,有多个域名的情况下,通常要做一个固定域名服务器中转一下
-  -- 这个方法负责从原始应该使用的地址转换成另一个中转地址
-  wxAuthConfigFixReturnUrl :: UrlText -> HandlerT site IO UrlText
-  wxAuthConfigFixReturnUrl = return
-
-  wxAuthConfigApiEnv :: HandlerT site IO WxppApiEnv
-
-
 -- | 使用微信 union id 机制作为身份认证
 -- 为同时支持微信内、外访问网页，网站必须设置使用 union id，
 -- 而不仅是 open id
@@ -65,19 +49,18 @@ authWeixin =
     loginWidget :: (Route Auth -> Route m) -> WidgetT m IO ()
     loginWidget toMaster = do
       in_wx <- isJust <$> handlerGetWeixinClientVersion
-      (auth_config, mk_url, cb_route) <-
+      (app_id, mk_url, cb_route) <-
             if in_wx
               then do
                 let scope = AS_SnsApiUserInfo
                 (, flip wxppOAuthRequestAuthInsideWx scope, loginCallbackInR)
-                    <$> handlerToWidget wxAuthConfigInsideWX
+                    <$> handlerToWidget (fmap fst wxAuthConfigInsideWX)
               else do
                 (, wxppOAuthRequestAuthOutsideWx, loginCallbackOutR)
-                    <$> handlerToWidget wxAuthConfigOutsideWX
+                    <$> handlerToWidget (fmap fst wxAuthConfigOutsideWX)
       render_url <- getUrlRender
       callback_url <- handlerToWidget $ wxAuthConfigFixReturnUrl $
                                           UrlText $ render_url (toMaster cb_route)
-      let app_id = wxppAuthAppID auth_config
       state <- wxppOAuthMakeRandomState app_id
       let auth_url = mk_url app_id callback_url state
       [whamlet|
@@ -123,12 +106,10 @@ logSource :: Text
 logSource = "WeixinAuthPlugin"
 
 getLoginCallbackReal :: YesodAuthWeiXin master
-                    => WxppAuthConfig
+                    => WxOAuthConfig
                     -> HandlerT Auth (HandlerT master IO) TypedContent
-getLoginCallbackReal auth_config = do
+getLoginCallbackReal (app_id, secret_or_broker) = do
     m_code <- fmap OAuthCode <$> lookupGetParam "code"
-    let app_id = wxppAuthAppID auth_config
-        secret = wxppAuthAppSecret auth_config
 
     oauth_state <- liftM (fromMaybe "") $ lookupGetParam "state"
     m_expected_state <- lookupSession (sessionKeyWxppOAuthState app_id)
@@ -140,17 +121,34 @@ getLoginCallbackReal auth_config = do
     case m_code of
         Just code | not (deniedOAuthCode code) -> do
             -- 用户同意授权
-            wx_api_env <- lift wxAuthConfigApiEnv
-            err_or_atk_info <- tryWxppWsResult $
-                                  flip runReaderT wx_api_env $
-                                    wxppOAuthGetAccessToken app_id secret code
-            atk_info <- case err_or_atk_info of
-                            Left err -> do
+            atk_info <- case secret_or_broker of
+                          Left secret -> do
+                            wx_api_env <- lift wxAuthConfigApiEnv
+                            err_or_atk_info <- tryWxppWsResult $
+                                                  flip runReaderT wx_api_env $
+                                                    wxppOAuthGetAccessToken app_id secret code
+                            case err_or_atk_info of
+                                Left err -> do
+                                    $logErrorS logSource $
+                                        "wxppOAuthGetAccessToken failed: " <> tshow err
+                                    throwM $ HCError $ InternalError "微信服务接口错误，请稍后重试"
+
+                                Right x -> return x
+
+                          Right broker -> do
+                            bres <- liftIO $ wxppApiBrokerOAuthGetAccessToken broker app_id code
+                            case bres of
+                              Nothing -> do
                                 $logErrorS logSource $
-                                    "wxppOAuthGetAccessToken failed: " <> tshow err
+                                    "wxppApiBrokerOAuthGetAccessToken return Nothing"
+                                throwM $ HCError $ InternalError "程序配置错误，请稍后重试"
+
+                              Just (WxppWsResp (Left err)) -> do
+                                $logErrorS logSource $
+                                    "wxppApiBrokerOAuthGetAccessToken failed: " <> tshow err
                                 throwM $ HCError $ InternalError "微信服务接口错误，请稍后重试"
 
-                            Right x -> return x
+                              Just (WxppWsResp (Right x)) -> return x
 
             let m_union_id = oauthAtkUnionID atk_info
 
