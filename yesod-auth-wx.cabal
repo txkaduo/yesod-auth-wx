@@ -18,6 +18,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Yesod.Auth.WeiXin
                        Yesod.Auth.WeiXin.Class
+                       Yesod.Auth.WeiXin.Utils
 
   -- other-modules:       
   default-extensions:  NoImplicitPrelude
@@ -26,11 +27,13 @@ library
                        QuasiQuotes
                        TupleSections
                        FlexibleContexts
+                       GADTs
 
   build-depends:       base >=4.8 && <4.9
                      , yesod-auth
                      , yesod-core
                      , classy-prelude-yesod
+                     , transformers
                      , wreq
                      , weixin-mp-sdk    >= 0.23
 
