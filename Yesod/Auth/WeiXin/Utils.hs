@@ -21,14 +21,14 @@ hGetWxUidFromSession app_id = runMaybeT $ do
 
 hWithRedirectUrl :: (MonadHandler m, site ~ HandlerSite m, YesodAuthWeiXin site)
                    => Route site
+                   -> [(Text, Text)]
                    -> OAuthScope
                     -- ^ used only when inside WX
                    -> (WxppAppID -> UrlText -> m a)
                    -> m a
-hWithRedirectUrl oauth_return_route oauth_scope f = do
+hWithRedirectUrl oauth_return_route params0 oauth_scope f = do
   is_client_wx <- isJust <$> handlerGetWeixinClientVersion
 
-  params0 <- reqGetParams <$> getRequest
   let params = filter ((/= "code") . fst) params0
 
   url_render <- getUrlRenderParams
