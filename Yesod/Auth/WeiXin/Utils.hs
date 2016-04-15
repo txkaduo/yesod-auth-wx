@@ -1,6 +1,5 @@
 module Yesod.Auth.WeiXin.Utils
-  ( hGetWxUidFromSession
-  , hWithRedirectUrl
+  ( hWithRedirectUrl
   , module Yesod.Auth.WeiXin.Class
   ) where
 
@@ -10,13 +9,6 @@ import           Control.Monad.Trans.Maybe
 import           WeiXin.PublicPlatform
 
 import           Yesod.Auth.WeiXin.Class
-
-
-hGetWxUidFromSession :: MonadHandler m => WxppAppID -> m (Maybe (WxppAppOpenID, Maybe WxppUnionID))
-hGetWxUidFromSession app_id = runMaybeT $ do
-  open_id <- MaybeT $ sessionGetWxppUser app_id
-  m_union_id <- lift $ fmap WxppUnionID <$> lookupSession sessionKeyWxppUnionId
-  return (WxppAppOpenID app_id open_id, m_union_id)
 
 
 hWithRedirectUrl :: (MonadHandler m, site ~ HandlerSite m, YesodAuthWeiXin site)
