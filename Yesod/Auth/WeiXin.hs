@@ -52,8 +52,10 @@ authWeixin =
       (app_id, mk_url, cb_route) <-
             if in_wx
               then do
+                let m_comp_app_id = Nothing
                 let scope = AS_SnsApiUserInfo
-                (, flip wxppOAuthRequestAuthInsideWx scope, loginCallbackInR)
+
+                (, flip (wxppOAuthRequestAuthInsideWx m_comp_app_id) scope, loginCallbackInR)
                     <$> handlerToWidget (fmap fst wxAuthConfigInsideWX)
               else do
                 (, wxppOAuthRequestAuthOutsideWx, loginCallbackOutR)

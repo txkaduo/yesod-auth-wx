@@ -34,7 +34,10 @@ hWithRedirectUrl oauth_return_route params0 oauth_scope f = do
              app_id <- fmap fst wxAuthConfigInsideWX
              random_state <- wxppOAuthMakeRandomState app_id
 
-             let url = wxppOAuthRequestAuthInsideWx app_id
+             let m_comp_app_id = Nothing
+             let url = wxppOAuthRequestAuthInsideWx
+                                     m_comp_app_id
+                                     app_id
                                      oauth_scope
                                      oauth_retrurn_url2
                                      random_state
