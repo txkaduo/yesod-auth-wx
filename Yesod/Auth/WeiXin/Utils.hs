@@ -4,7 +4,6 @@ module Yesod.Auth.WeiXin.Utils
   ) where
 
 import           ClassyPrelude.Yesod
-import           Control.Monad.Trans.Maybe
 
 import           WeiXin.PublicPlatform
 
