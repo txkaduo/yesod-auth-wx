@@ -123,9 +123,9 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
     case m_code of
         Just code | not (deniedOAuthCode code) -> do
             -- 用户同意授权
+            wx_api_env <- lift wxAuthConfigApiEnv
             atk_info <- case secret_or_broker of
                           Left secret -> do
-                            wx_api_env <- lift wxAuthConfigApiEnv
                             err_or_atk_info <- tryWxppWsResult $
                                                   flip runReaderT wx_api_env $
                                                     wxppOAuthGetAccessToken app_id secret code
@@ -152,7 +152,18 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
 
                               Just (WxppWsResp (Right x)) -> return x
 
-            let m_union_id = oauthAtkUnionID atk_info
+            now <- liftIO getCurrentTime
+            let open_id = oauthAtkOpenID atk_info
+                scopes  = oauthAtkScopes atk_info
+
+            m_union_id <- if member AS_SnsApiUserInfo scopes
+                             then do
+                                let atk_p   = packOAuthTokenInfo app_id open_id
+                                              (fromOAuthAccessTokenResult now atk_info)
+                                oauth_user_info <- flip runReaderT wx_api_env $ wxppOAuthGetUserInfo' atk_p
+                                return $ oauthUserInfoUnionID oauth_user_info
+
+                             else return Nothing
 
             ident <- case m_union_id of
                       Nothing -> do

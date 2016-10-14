@@ -35,7 +35,7 @@ library
                      , classy-prelude-yesod
                      , transformers
                      , wreq
-                     , weixin-mp-sdk    >= 0.24
+                     , weixin-mp-sdk    >= 0.26.2
 
   ghc-options:         -Wall
 
