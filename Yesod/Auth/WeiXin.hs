@@ -156,7 +156,7 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
             let open_id = oauthAtkOpenID atk_info
                 scopes  = oauthAtkScopes atk_info
 
-            m_union_id <- if member AS_SnsApiUserInfo scopes
+            m_union_id <- if member AS_SnsApiUserInfo scopes || member AS_SnsApiLogin scopes
                              then do
                                 let atk_p   = packOAuthTokenInfo app_id open_id
                                               (fromOAuthAccessTokenResult now atk_info)
