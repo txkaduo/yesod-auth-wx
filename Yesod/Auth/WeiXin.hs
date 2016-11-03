@@ -54,7 +54,7 @@ authWeixin =
             if in_wx
               then do
                 let m_comp_app_id = Nothing
-                let scope = AS_SnsApiUserInfo
+                let scope = oauthScopeMinForUnionID
 
                 (, flip (wxppOAuthRequestAuthInsideWx m_comp_app_id) scope, loginCallbackInR)
                     <$> handlerToWidget (fmap fst wxAuthConfigInsideWX)
