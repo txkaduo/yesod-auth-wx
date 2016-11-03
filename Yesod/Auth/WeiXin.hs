@@ -9,6 +9,7 @@ module Yesod.Auth.WeiXin
   ) where
 
 import           ClassyPrelude.Yesod
+import           Control.Monad.Trans.Maybe
 import           Yesod.Auth
 import qualified Yesod.Auth.Message          as Msg
 import           Yesod.Core.Types            (HandlerContents (HCError))
@@ -152,18 +153,23 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
 
                               Just (WxppWsResp (Right x)) -> return x
 
-            now <- liftIO getCurrentTime
             let open_id = oauthAtkOpenID atk_info
                 scopes  = oauthAtkScopes atk_info
+                atk_p = getOAuthAccessTokenPkg (app_id, atk_info)
 
-            m_union_id <- if member AS_SnsApiUserInfo scopes || member AS_SnsApiLogin scopes
-                             then do
-                                let atk_p   = packOAuthTokenInfo app_id open_id
-                                              (fromOAuthAccessTokenResult now atk_info)
-                                oauth_user_info <- flip runReaderT wx_api_env $ wxppOAuthGetUserInfo' atk_p
-                                return $ oauthUserInfoUnionID oauth_user_info
+            let get_union_id1 = MaybeT $ return $ oauthAtkUnionID atk_info
+                get_union_id2 = do
+                  guard $ any oauthScopeCanGetUserInfo scopes
 
-                             else return Nothing
+                  err_or_oauth_user_info <- tryWxppWsResult $ flip runReaderT wx_api_env $ wxppOAuthGetUserInfo' atk_p
+                  case err_or_oauth_user_info of
+                    Left err -> do $logErrorS wxppLogSource $ "wxppOAuthGetUserInfo' failed: " <> tshow err
+                                   mzero
+
+                    Right oauth_user_info -> do
+                      MaybeT $ return $ oauthUserInfoUnionID oauth_user_info
+
+            m_union_id <- runMaybeT $ get_union_id1 <|> get_union_id2
 
             ident <- case m_union_id of
                       Nothing -> do
@@ -171,6 +177,7 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
                         throwM $ HCError $ InternalError "微信服务配置错误，请稍后重试"
                       Just uid -> return $ unWxppUnionID uid
 
+            sessionMarkWxppUser app_id open_id m_union_id
             lift $ setCredsRedirect (Creds wxAuthPluginName ident [])
 
         _ -> do
