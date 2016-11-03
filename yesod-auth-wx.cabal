@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                yesod-auth-wx
-version:             0.7.0.1
+version:             0.7.1.0
 -- synopsis:            
 -- description:         
 license:             MIT
