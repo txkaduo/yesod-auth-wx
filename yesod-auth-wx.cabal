@@ -29,7 +29,7 @@ library
                        FlexibleContexts
                        GADTs
 
-  build-depends:       base >=4.8 && <4.9
+  build-depends:       base >=4.8 && <5
                      , yesod-auth
                      , yesod-core
                      , classy-prelude-yesod
