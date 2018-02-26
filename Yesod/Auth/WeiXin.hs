@@ -13,7 +13,6 @@ import           ClassyPrelude.Yesod
 import           Control.Monad.Except
 import           Control.Monad.Trans.Maybe
 import           Data.Aeson.Text as A
-import qualified Data.Text as T
 import           Data.Time.Clock.POSIX
 import           Yesod.Auth
 import qualified Yesod.Auth.Message          as Msg
@@ -179,10 +178,11 @@ getLoginQrScanStartR = do
 
   (_get_stat, save_stat) <- lift handlerGetQrCodeStateStorage
 
-  m_req_union_id0 <-
-    lift $ runInputGet $ iopt textField "req_union_id"
-
+  {-
+  m_req_union_id0 <- lift $ runInputGet $ iopt textField "req_union_id"
   let req_union_id = not . null $ T.strip $ fromMaybe "" m_req_union_id0
+  --}
+  let req_union_id = True -- 目前的逻辑这是必须的
 
   sess <- fmap fromString $ randomUrlSafeString 64
   -- 若要调试，则要写死生成的 sess 值，否则yesod每次包装tmpXXXX.js文件名都发生变化
