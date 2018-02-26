@@ -15,12 +15,16 @@ build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
 
+Flag network-uri
+    Description: Get Network.URI from the network-uri package
+    Default: True
+
 library
   exposed-modules:     Yesod.Auth.WeiXin
                        Yesod.Auth.WeiXin.Class
-                       Yesod.Auth.WeiXin.Utils
 
-  -- other-modules:       
+  other-modules:       Yesod.Auth.WeiXin.Utils
+
   default-extensions:  NoImplicitPrelude
                        TemplateHaskell
                        OverloadedStrings
@@ -34,8 +38,20 @@ library
                      , yesod-core
                      , classy-prelude-yesod
                      , transformers
+                     , mtl
                      , wreq
-                     , weixin-mp-sdk    >= 0.27.2
+                     , aeson
+                     , text
+                     , wai
+                     , time
+                     , yesod-websockets
+                     , random
+                     , weixin-mp-sdk    >= 0.37.2
+
+  if flag(network-uri)
+     build-depends: network-uri >= 2.6, network >= 2.6
+  else
+     build-depends: network-uri < 2.6, network < 2.6
 
   ghc-options:         -Wall
 
