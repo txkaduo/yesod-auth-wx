@@ -91,7 +91,7 @@ authWeixin get_known_origins =
     dispatch "GET" ["qrcode", "query", sess]    = fmap toTypedContent (getLoginQrCodeQueryR sess) >>= sendResponse
     dispatch "POST" ["qrcode", "confirm", sess] = fmap toTypedContent (postLoginQrCodeConfirmR get_known_origins sess) >>= sendResponse
     dispatch "POST" ["qrcode", "cancel", sess]  = fmap toTypedContent (postLoginQrCodeCancelR get_known_origins sess) >>= sendResponse
-    dispatch "POST" ["qrcode", "ping", sess]    = fmap toTypedContent (postLoginQrCodePingR sess) >>= sendResponse
+    dispatch "POST" ["qrcode", "ping", sess]    = fmap toTypedContent (postLoginQrCodePingR get_known_origins sess) >>= sendResponse
     dispatch "GET" ["qrcode", "done", sess ]    = fmap toTypedContent (getLoginQrScanDoneR sess) >>= sendResponse
     dispatch _ _                                = notFound
 
@@ -464,19 +464,14 @@ postLoginQrCodeCancelR get_known_origins sess = do
 
 
 postLoginQrCodePingR :: YesodAuthWeiXin master
-                     => Text -> HandlerT Auth (HandlerT master IO) Value
+                     => HandlerT master IO [String]
+                     -> Text -> HandlerT Auth (HandlerT master IO) Value
 -- {{{1
-postLoginQrCodePingR sess = do
-  neverCache
-
-  ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
-
+postLoginQrCodePingR get_known_origins sess = do
   now_int <- liftIO $ fmap round $ getPOSIXTime
-  let sess_dat' = sess_dat { wxScanQrCodeSessScanTime = Just now_int }
+  let update_sess sess_dat = sess_dat { wxScanQrCodeSessScanTime = Just now_int }
 
-  lift $ save_stat sess sess_dat'
-
-  return $ object []
+  ajaxLoginQrCodeConfirmR get_known_origins update_sess sess
 -- }}}1
 
 
