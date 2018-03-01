@@ -86,7 +86,7 @@ getOAuthAccessTokenBySecretOrBroker :: (IsString e, WxppApiBroker a
                                     -> Either WxppAppSecret a
                                     -> WxppAppID
                                     -> OAuthCode
-                                    -> m OAuthAccessTokenResult
+                                    -> m (Maybe OAuthAccessTokenResult)
 getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code = do
   case secret_or_broker of
     Left secret -> do
@@ -95,11 +95,14 @@ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code = do
                               wxppOAuthGetAccessToken app_id secret code
       case err_or_atk_info of
           Left err -> do
-              $logErrorS logSource $
-                  "wxppOAuthGetAccessToken failed: " <> tshow err
-              throwError "微信服务接口错误，请稍后重试"
+            if fmap wxppToErrorCodeX (wxppCallWxError err) == Just (wxppToErrorCode WxppOAuthCodeHasBeenUsed)
+               then return Nothing
+               else do
+                    $logErrorS logSource $
+                        "wxppOAuthGetAccessToken failed: " <> tshow err
+                    throwError "微信服务接口错误，请稍后重试"
 
-          Right x -> return x
+          Right x -> return $ Just x
 
     Right broker -> do
       bres <- liftIO $ wxppApiBrokerOAuthGetAccessToken broker app_id code
@@ -114,7 +117,7 @@ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code = do
               "wxppApiBrokerOAuthGetAccessToken failed: " <> tshow err
           throwError "微信服务接口错误，请稍后重试"
 
-        Just (WxppWsResp (Right x)) -> return x
+        Just (WxppWsResp (Right x)) -> return $ Just x
 
 
 handlerGetQrCodeStateStorage :: (MonadHandler m, HandlerSite m ~ site, YesodAuthWeiXin site)

@@ -603,7 +603,12 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
             wx_api_env <- lift wxAuthConfigApiEnv
             err_or_atk_info <- runExceptT $ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code
             atk_info <- case err_or_atk_info of
-                          Right x -> return x
+                          Right (Just x) -> return x
+                          Right Nothing -> do
+                            -- want to retry oauth
+                            -- 暂时不支持
+                            permissionDenied $ "授权失败，请回到开始页重试"
+
                           Left err -> do
                             $logErrorS logSource $
                                 "wxppOAuthGetAccessToken failed: " <> fromString err
