@@ -238,6 +238,11 @@ getLoginQrScanStartR = do
       function handle_server_respone(res) {
         if (res.scanned) {
           if (res.confirmed) {
+            if (repeat_id) clearTimeout(repeat_id);
+            if (socket) {
+              socket.onclose = function () {};
+              socket.close();
+            }
              window.location = '@{route_to_parent $ loginQrCodeDoneR sess}';
           } else {
             show_msg_dialog('二维码已扫描，请在微信内确认登录');
@@ -289,14 +294,18 @@ getLoginQrScanStartR = do
           socket.addEventListener('error', function (event) {
             show_msg_dialog('服务器错误: ' + event + '，请刷新并重试');
           });
-         });
 
-         socket.addEventListener('close', function () {
-           // fallback to ajax
-           socket = null;
-           repeat_id = setTimeout(query_if_scanned, 1000);
-           setTimeout(setup_socket, 3000);
-         });
+          socket.addEventListener('close', function () {
+            // fallback to ajax
+            socket = null;
+
+            if (repeat_id) clearTimeout(repeat_id);
+            repeat_id = setTimeout(query_if_scanned, 1000);
+
+            setTimeout(setup_socket, 3000);
+          });
+        });
+
       }
 
       $(function () {
@@ -553,6 +562,7 @@ getLoginQrScanScannedR sess = do
           });
 
           var repeat_id = null;
+          var ping_repeat_id = null;
           var socket = null;
 
           function show_msg_dialog(msg) {
@@ -564,6 +574,8 @@ getLoginQrScanScannedR sess = do
           }
 
           function setup_ajax_loop() {
+            if (repeat_id) clearTimeout(repeat_id);
+
             repeat_id = setInterval(
                             function () { $.ajax({url: '@{route_to_parent $ loginQrCodePingR sess}', type: 'POST'});
                                         },
@@ -573,16 +585,30 @@ getLoginQrScanScannedR sess = do
           function setup_socket() {
             socket = new WebSocket('@{route_to_parent $ loginQrCodeScannedR sess}'.replace(/^http/, 'ws'));
             socket.addEventListener('open', function () {
-              // don't need to handle message, keep alive by ping from server
               if (repeat_id) clearTimeout(repeat_id);
+
+              if (ping_repeat_id) clearTimeout(ping_repeat_id);
+              ping_repeat_id = setInterval(function () { socket.send(""); }, 3000);
+
+              socket.addEventListener('close', function () {
+                // fallback to ajax
+                setup_ajax_loop();
+                if (ping_repeat_id) clearTimeout(ping_repeat_id);
+                socket = null;
+                setTimeout(setup_socket, 3000);
+              });
             });
 
-            socket.addEventListener('close', function () {
-              // fallback to ajax
-              setup_ajax_loop();
-              socket = null;
-              setTimeout(setup_socket, 3000);
-            });
+          }
+
+          function closeWindow() {
+            if (socket) {
+              socket.onclose = function () {};
+              socket.close();
+            }
+            if (ping_repeat_id) clearTimeout(ping_repeat_id);
+            if (repeat_id) clearTimeout(repeat_id);
+            wx.closeWindow();
           }
 
           $(function () {
@@ -593,7 +619,7 @@ getLoginQrScanScannedR sess = do
                 type: 'POST'
               })
               .done(function () {
-                wx.closeWindow();
+                closeWindow();
               })
               .fail(function() {
                 if (repeat_id) {
@@ -612,10 +638,10 @@ getLoginQrScanScannedR sess = do
                 type: 'POST'
               })
               .done(function () {
-                wx.closeWindow();
+                closeWindow();
               })
               .fail(function() {
-                wx.closeWindow();
+                closeWindow();
               });
             });
 
