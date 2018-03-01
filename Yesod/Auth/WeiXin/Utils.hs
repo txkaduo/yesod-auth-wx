@@ -112,10 +112,13 @@ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code = do
               "wxppApiBrokerOAuthGetAccessToken return Nothing"
           throwError "程序配置错误，请稍后重试"
 
-        Just (WxppWsResp (Left err)) -> do
-          $logErrorS logSource $
-              "wxppApiBrokerOAuthGetAccessToken failed: " <> tshow err
-          throwError "微信服务接口错误，请稍后重试"
+        Just (WxppWsResp (Left err@(WxppAppError wxerr _msg))) -> do
+          if wxppToErrorCodeX wxerr == wxppToErrorCode WxppOAuthCodeHasBeenUsed
+             then return Nothing
+             else do
+                  $logErrorS logSource $
+                      "wxppApiBrokerOAuthGetAccessToken failed: " <> tshow err
+                  throwError "微信服务接口错误，请稍后重试"
 
         Just (WxppWsResp (Right x)) -> return $ Just x
 

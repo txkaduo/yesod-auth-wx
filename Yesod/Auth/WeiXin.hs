@@ -673,9 +673,8 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
             atk_info <- case err_or_atk_info of
                           Right (Just x) -> return x
                           Right Nothing -> do
-                            -- want to retry oauth
-                            -- 暂时不支持
-                            permissionDenied $ "授权失败，请回到开始页重试"
+                            -- want to retry oauth, restart the whole process
+                            loginHandler >>= sendResponse
 
                           Left err -> do
                             $logErrorS logSource $
