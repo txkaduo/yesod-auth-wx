@@ -20,6 +20,7 @@ data WxScanQrCodeSess =
     , wxScanQrCodeSessConfirmed  :: Bool
     -- ^ WxScanQrCodeConfirmR 设置为True
     }
+    deriving (Show, Eq)
 
 $(deriveJSON (defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 15 }) ''WxScanQrCodeSess)
 
