@@ -2,6 +2,7 @@
 module Yesod.Auth.WeiXin
   ( wxAuthPluginName
   , wxAuthDummyPluginName
+  , wxAuthRouteNeedExternalUrl
   , YesodAuthWeiXin(..)
   , authWeixin
   , authWeixinDummy
@@ -10,7 +11,7 @@ module Yesod.Auth.WeiXin
 
 -- {{{1
 import           ClassyPrelude.Yesod
-import           Control.Monad.Except
+import           Control.Monad.Except hiding (mapM_)
 import           Control.Monad.Trans.Maybe
 import           Data.Aeson.Text as A
 import           Data.Time.Clock.POSIX
@@ -53,6 +54,9 @@ loginQrCodeDoneR sess = PluginR wxAuthPluginName ["qrcode", "done", sess]
 loginQrCodeConfirmR :: Text -> AuthRoute
 loginQrCodeConfirmR sess = PluginR wxAuthPluginName ["qrcode", "confirm", sess]
 
+loginQrCodeCancelR :: Text -> AuthRoute
+loginQrCodeCancelR sess = PluginR wxAuthPluginName ["qrcode", "cancel", sess]
+
 loginQrCodePingR :: Text -> AuthRoute
 loginQrCodePingR sess = PluginR wxAuthPluginName ["qrcode", "ping", sess]
 
@@ -60,12 +64,21 @@ loginDummyR :: AuthRoute
 loginDummyR = PluginR wxAuthDummyPluginName ["login"]
 
 
+-- | 有一个route会生成被微信扫描同的二维码，需生成外部URL
+-- 仅用于主服务器有两个approot，一个内部访问（方便测试），另一个从外部访问
+wxAuthRouteNeedExternalUrl :: AuthRoute -> Bool
+wxAuthRouteNeedExternalUrl (PluginR _ ["qrcode", "scanned", _sess]) = True
+wxAuthRouteNeedExternalUrl _                                        = False
+
+
 -- | 使用微信 union id 机制作为身份认证
 -- 为同时支持微信内、外访问网页，网站必须设置使用 union id，
 -- 而不仅是 open id
 -- 最后生成的 Creds 中的 ident 部分就是一个 union id
-authWeixin :: forall m. YesodAuthWeiXin m => AuthPlugin m
-authWeixin =
+authWeixin :: forall m. YesodAuthWeiXin m
+           => HandlerT m IO [String]
+           -> AuthPlugin m
+authWeixin get_known_origins =
   AuthPlugin wxAuthPluginName dispatch loginWidget
   where
     dispatch "GET" ["wxcb", "out" ]             = getLoginCallbackOutR >>= sendResponse
@@ -73,7 +86,8 @@ authWeixin =
     dispatch "GET" ["qrcode", "start" ]         = fmap toTypedContent getLoginQrScanStartR >>= sendResponse
     dispatch "GET" ["qrcode", "scanned", sess ] = fmap toTypedContent (getLoginQrScanScannedR sess) >>= sendResponse
     dispatch "GET" ["qrcode", "query", sess]    = fmap toTypedContent (getLoginQrCodeQueryR sess) >>= sendResponse
-    dispatch "POST" ["qrcode", "confirm", sess] = fmap toTypedContent (postLoginQrCodeConfirmR sess) >>= sendResponse
+    dispatch "POST" ["qrcode", "confirm", sess] = fmap toTypedContent (postLoginQrCodeConfirmR get_known_origins sess) >>= sendResponse
+    dispatch "POST" ["qrcode", "cancel", sess]  = fmap toTypedContent (postLoginQrCodeCancelR get_known_origins sess) >>= sendResponse
     dispatch "POST" ["qrcode", "ping", sess]    = fmap toTypedContent (postLoginQrCodePingR sess) >>= sendResponse
     dispatch "GET" ["qrcode", "done", sess ]    = fmap toTypedContent (getLoginQrScanDoneR sess) >>= sendResponse
     dispatch _ _                                = notFound
@@ -234,6 +248,8 @@ getLoginQrScanStartR = do
             if (!socket || socket.readyState != socket.OPEN) {
               repeat_id = setTimeout(query_if_scanned, 1000);
             }
+
+            hide_msg_dialog();
           } else {
             show_msg_dialog('二维码已超时，请刷新页面');
           }
@@ -363,13 +379,50 @@ getLoginQrCodeQueryR sess = do
 -- }}}1
 
 
-postLoginQrCodeConfirmR :: YesodAuthWeiXin master
-                        => Text -> HandlerT Auth (HandlerT master IO) Value
+addAllowOriginHeader :: HandlerT master IO [String] -> HandlerT master IO ()
 -- {{{1
-postLoginQrCodeConfirmR sess = do
+addAllowOriginHeader get_known_origins = do
+  m_origin <- runMaybeT $ do
+    origin <- fmap decodeUtf8 $ MaybeT $ lookupHeader "Origin"
+    known_origins <- lift get_known_origins
+    guard $ unpack origin `elem` known_origins
+    return origin
+
+  mapM_ (addHeader "Access-Control-Allow-Origin") m_origin
+-- }}}1
+
+postLoginQrCodeConfirmR :: YesodAuthWeiXin master
+                        => HandlerT master IO [String]
+                        -> Text
+                        -> HandlerT Auth (HandlerT master IO) Value
+-- {{{1
+postLoginQrCodeConfirmR get_known_origins sess = do
   neverCache
+  lift $ addAllowOriginHeader get_known_origins
+
   ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
   let sess_dat' = sess_dat { wxScanQrCodeSessConfirmed = True }
+
+  lift $ save_stat sess sess_dat'
+  return $ object []
+-- }}}1
+
+
+postLoginQrCodeCancelR :: YesodAuthWeiXin master
+                       => HandlerT master IO [String]
+                       -> Text
+                       -> HandlerT Auth (HandlerT master IO) Value
+-- {{{1
+postLoginQrCodeCancelR get_known_origins sess = do
+  neverCache
+  lift $ addAllowOriginHeader get_known_origins
+
+  ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
+  let sess_dat' = sess_dat { wxScanQrCodeSessScanTime = Nothing
+                           , wxScanQrCodeSessOpenId = Nothing
+                           , wxScanQrCodeSessUnionId = Nothing
+                           , wxScanQrCodeSessConfirmed = False
+                           }
 
   lift $ save_stat sess sess_dat'
   return $ object []
@@ -490,6 +543,19 @@ getLoginQrScanScannedR sess = do
                             1000);
           }
 
+          function setup_socket() {
+            socket = new WebSocket('@{route_to_parent $ loginQrCodeScannedR sess}'.replace(/^http/, 'ws'));
+            socket.addEventListener('open', function () {
+              // do nothing, keep alive by ping from server
+            });
+
+            socket.addEventListener('close', function () {
+              // fallback to ajax
+              setup_ajax_loop();
+              setTimeout(setup_socket, 3000);
+            });
+          }
+
           $(function () {
             $("#confirm_btn").click(function () {
               show_msg_dialog("请稍候.....");
@@ -501,28 +567,30 @@ getLoginQrScanScannedR sess = do
                 wx.closeWindow();
               })
               .fail(function() {
-                  if (repeat_id) {
-                    clearTimeout(repeat_id);
-                  }
-                  show_msg_dialog('服务器错误，请刷新并重试');
-              })
+                if (repeat_id) {
+                  clearTimeout(repeat_id);
+                }
+                show_msg_dialog('服务器错误，请刷新并重试');
+              });
             });
 
-            socket = new WebSocket('@{route_to_parent $ loginQrCodeScannedR sess}'.replace(/^http/, 'ws'));
-            if (socket) {
-              socket.addEventListener('open', function () {
-                // do nothing, keep alive by ping from server
+            $("#cancel_btn").click(function () {
+              if (repeat_id) {
+                clearTimeout(repeat_id);
+              }
+              $.ajax({
+                url: '@{route_to_parent $ loginQrCodeCancelR sess}',
+                type: 'POST'
+              })
+              .done(function () {
+                wx.closeWindow();
+              })
+              .fail(function() {
+                wx.closeWindow();
               });
+            });
 
-              socket.addEventListener('close', function () {
-                // fallback to ajax
-                setup_ajax_loop();
-              });
-            } else {
-              // fallback to ajax
-              setup_ajax_loop();
-            }
-
+            setup_socket();
           });
         |]
 
@@ -532,7 +600,7 @@ getLoginQrScanScannedR sess = do
 
             <div .center-block>
               <button type=button .btn .btn-lg .btn-primary #confirm_btn>是的，授权登录
-              <button type=button .btn .btn-lg .btn-default onclick="wx.closeWindow();">取消
+              <button type=button .btn .btn-lg .btn-default #cancel_btn>取消
 
           <div #msg_dialog .modal role=dialog>
             <div .modal-dialog>
