@@ -68,6 +68,9 @@ loginDummyR = PluginR wxAuthDummyPluginName ["login"]
 -- 仅用于主服务器有两个approot，一个内部访问（方便测试），另一个从外部访问
 wxAuthRouteNeedExternalUrl :: AuthRoute -> Bool
 wxAuthRouteNeedExternalUrl (PluginR _ ["qrcode", "scanned", _sess]) = True
+-- confirm, cancel 因为要检查session里的openid，要与scanned在一个origin里
+wxAuthRouteNeedExternalUrl (PluginR _ ["qrcode", "confirm", _sess]) = True
+wxAuthRouteNeedExternalUrl (PluginR _ ["qrcode", "cancel", _sess])  = True
 wxAuthRouteNeedExternalUrl _                                        = False
 
 
@@ -274,6 +277,28 @@ getLoginQrScanStartR = do
           ;
       }
 
+      function setup_socket() {
+        socket = new WebSocket('@{route_to_parent $ loginQrCodeQueryR sess}'.replace(/^http/, 'ws'));
+        socket.addEventListener('open', function () {
+          if (repeat_id) clearTimeout(repeat_id);
+
+          socket.addEventListener('message', function (event) {
+            var res = JSON.parse(event.data);
+            handle_server_respone(res);
+          });
+          socket.addEventListener('error', function (event) {
+            show_msg_dialog('服务器错误: ' + event + '，请刷新并重试');
+          });
+         });
+
+         socket.addEventListener('close', function () {
+           // fallback to ajax
+           socket = null;
+           repeat_id = setTimeout(query_if_scanned, 1000);
+           setTimeout(setup_socket, 3000);
+         });
+      }
+
       $(function () {
         $('#qrcode').qrcode({
                             width: 256,
@@ -281,26 +306,7 @@ getLoginQrScanStartR = do
                             text: #{toJSON scan_url}
                            });
 
-        socket = new WebSocket('@{route_to_parent $ loginQrCodeQueryR sess}'.replace(/^http/, 'ws'));
-        if (socket) {
-           socket.addEventListener('open', function () {
-             socket.addEventListener('message', function (event) {
-               var res = JSON.parse(event.data);
-               handle_server_respone(res);
-             });
-             socket.addEventListener('error', function (event) {
-               show_msg_dialog('服务器错误: ' + event + '，请刷新并重试');
-             });
-           });
-
-           socket.addEventListener('close', function () {
-             // fallback to ajax
-             repeat_id = setTimeout(query_if_scanned, 1000);
-           });
-        } else {
-          // fallback to ajax
-          repeat_id = setTimeout(query_if_scanned, 1000);
-        }
+        setup_socket();
       });
 
     |]
@@ -391,20 +397,43 @@ addAllowOriginHeader get_known_origins = do
   mapM_ (addHeader "Access-Control-Allow-Origin") m_origin
 -- }}}1
 
+
+ajaxLoginQrCodeConfirmR :: YesodAuthWeiXin master
+                        => HandlerT master IO [String]
+                        -> (WxScanQrCodeSess -> WxScanQrCodeSess)
+                        -> Text
+                        -> HandlerT Auth (HandlerT master IO) Value
+-- {{{1
+ajaxLoginQrCodeConfirmR get_known_origins update_sess sess = do
+  neverCache
+  lift $ addAllowOriginHeader get_known_origins
+
+  (app_id, _secret_or_broker) <- lift $ wxAuthConfigInsideWX
+  expect_open_id <- sessionGetWxppUser app_id
+                      >>= maybe (permissionDenied "WX not logged in") return
+
+  ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
+  case wxScanQrCodeSessOpenId sess_dat of
+    Nothing -> permissionDenied "no open id in session"
+    Just open_id -> do
+      if expect_open_id == open_id
+         then do
+              let sess_dat' = update_sess sess_dat
+
+              lift $ save_stat sess sess_dat'
+              return $ object []
+         else permissionDenied "open_id mismatch"
+-- }}}1
+
+
 postLoginQrCodeConfirmR :: YesodAuthWeiXin master
                         => HandlerT master IO [String]
                         -> Text
                         -> HandlerT Auth (HandlerT master IO) Value
 -- {{{1
 postLoginQrCodeConfirmR get_known_origins sess = do
-  neverCache
-  lift $ addAllowOriginHeader get_known_origins
-
-  ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
-  let sess_dat' = sess_dat { wxScanQrCodeSessConfirmed = True }
-
-  lift $ save_stat sess sess_dat'
-  return $ object []
+  let update_sess sess_dat = sess_dat { wxScanQrCodeSessConfirmed = True }
+  ajaxLoginQrCodeConfirmR get_known_origins update_sess sess
 -- }}}1
 
 
@@ -414,18 +443,14 @@ postLoginQrCodeCancelR :: YesodAuthWeiXin master
                        -> HandlerT Auth (HandlerT master IO) Value
 -- {{{1
 postLoginQrCodeCancelR get_known_origins sess = do
-  neverCache
-  lift $ addAllowOriginHeader get_known_origins
+  let update_sess sess_dat =
+        sess_dat { wxScanQrCodeSessScanTime = Nothing
+                 , wxScanQrCodeSessOpenId = Nothing
+                 , wxScanQrCodeSessUnionId = Nothing
+                 , wxScanQrCodeSessConfirmed = False
+                 }
 
-  ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
-  let sess_dat' = sess_dat { wxScanQrCodeSessScanTime = Nothing
-                           , wxScanQrCodeSessOpenId = Nothing
-                           , wxScanQrCodeSessUnionId = Nothing
-                           , wxScanQrCodeSessConfirmed = False
-                           }
-
-  lift $ save_stat sess sess_dat'
-  return $ object []
+  ajaxLoginQrCodeConfirmR get_known_origins update_sess sess
 -- }}}1
 
 
@@ -499,6 +524,8 @@ getLoginQrScanScannedR sess = do
         Nothing | wxScanQrCodeSessReqUnionId sess_dat -> abort_with_msg "no union_id"
         _ -> return ()
 
+      sessionMarkWxppUser app_id open_id m_union_id
+
       let sess_dat' = sess_dat { wxScanQrCodeSessOpenId = Just open_id
                                , wxScanQrCodeSessUnionId = m_union_id
                                }
@@ -546,12 +573,14 @@ getLoginQrScanScannedR sess = do
           function setup_socket() {
             socket = new WebSocket('@{route_to_parent $ loginQrCodeScannedR sess}'.replace(/^http/, 'ws'));
             socket.addEventListener('open', function () {
-              // do nothing, keep alive by ping from server
+              // don't need to handle message, keep alive by ping from server
+              if (repeat_id) clearTimeout(repeat_id);
             });
 
             socket.addEventListener('close', function () {
               // fallback to ajax
               setup_ajax_loop();
+              socket = null;
               setTimeout(setup_socket, 3000);
             });
           }
