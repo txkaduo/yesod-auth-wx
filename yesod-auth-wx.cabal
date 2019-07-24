@@ -32,10 +32,15 @@ library
                        TupleSections
                        FlexibleContexts
                        GADTs
+                       RankNTypes
+                       CPP
+                       ConstraintKinds
 
   build-depends:       base >=4.8 && <5
+                     , yesod
                      , yesod-auth
                      , yesod-core
+                     , classy-prelude
                      , classy-prelude-yesod
                      , transformers
                      , mtl
@@ -46,7 +51,10 @@ library
                      , time
                      , yesod-websockets
                      , random
+                     , safe-exceptions
+                     , monad-logger
                      , weixin-mp-sdk    >= 0.37.3
+                     , yesod-compat
 
   if flag(network-uri)
      build-depends: network-uri >= 2.6, network >= 2.6

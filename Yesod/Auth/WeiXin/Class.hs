@@ -6,6 +6,8 @@ import           Data.Aeson.Types              (camelTo2)
 import           WeiXin.PublicPlatform
 import           Yesod.Auth             (YesodAuth)
 
+import           Yesod.Compat
+
 
 type WxOAuthConfig = (WxppAppID, Either WxppAppSecret SomeWxppApiBroker)
 
@@ -28,21 +30,21 @@ class (YesodAuth site) => YesodAuthWeiXin site where
 
   -- | The config for OAuth wthin WeiXin client
   -- 用于微信客户端内打开网页时的认证
-  wxAuthConfigInsideWX :: HandlerT site IO WxOAuthConfig
+  wxAuthConfigInsideWX :: HandlerOf site WxOAuthConfig
 
   -- | The config for OAuth outside WeiXin client
   -- 用于普通浏览器内打开网页时的认证
   -- Nothing: 代表没相关的app id，若wxAuthQrCodeStateStorage也不能提供相关入口
   -- 则不能使用微信外登录
-  wxAuthConfigOutsideWX :: HandlerT site IO (Maybe WxOAuthConfig)
+  wxAuthConfigOutsideWX :: HandlerOf site (Maybe WxOAuthConfig)
   wxAuthConfigOutsideWX = return Nothing
 
   -- | 自己实现微信外的扫码登录
   -- 须时值取状态及保存状态的一对函数. Text 参数是一个很长的随机字串
   -- CAUTION: 使用者还需自行保证已保存的状态定期会被消除. 例如使用 Redis 的 expire
   wxAuthQrCodeStateStorage :: site
-                           -> Maybe ( Text -> HandlerT site IO (Maybe WxScanQrCodeSess)
-                                    , Text -> WxScanQrCodeSess -> HandlerT site IO ()
+                           -> Maybe ( Text -> HandlerOf site (Maybe WxScanQrCodeSess)
+                                    , Text -> WxScanQrCodeSess -> HandlerOf site ()
                                     )
   wxAuthQrCodeStateStorage = const Nothing
 
@@ -53,14 +55,14 @@ class (YesodAuth site) => YesodAuthWeiXin site where
   -- | 由于微信限制了oauth重定向的返回地址只能用一个固定的域名
   -- 实用时,有多个域名的情况下,通常要做一个固定域名服务器中转一下
   -- 这个方法负责从原始应该使用的地址转换成另一个中转地址
-  wxAuthConfigFixReturnUrl :: UrlText -> HandlerT site IO UrlText
+  wxAuthConfigFixReturnUrl :: UrlText -> HandlerOf site UrlText
   wxAuthConfigFixReturnUrl = return
 
-  wxAuthConfigApiEnv :: HandlerT site IO WxppApiEnv
+  wxAuthConfigApiEnv :: HandlerOf site WxppApiEnv
 
   wxAuthGetJsTicket :: WxppAppID
-                    -> HandlerT site IO (Maybe WxppJsTicket)
+                    -> HandlerOf site (Maybe WxppJsTicket)
 
   wxAuthLookupUnionIdByOpenId :: WxppAppID
                               -> WxppOpenID
-                              -> HandlerT site IO (Maybe WxppUnionID)
+                              -> HandlerOf site (Maybe WxppUnionID)

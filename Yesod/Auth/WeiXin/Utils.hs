@@ -5,7 +5,9 @@ import           Control.Monad.Except hiding (replicateM)
 import           Data.List                  ((!!))
 import           Network.Wai                (rawQueryString)
 import           System.Random              (randomIO)
+import qualified Control.Exception.Safe as ExcSafe
 
+import           Yesod.Compat
 import           WeiXin.PublicPlatform
 
 import           Yesod.Auth.WeiXin.Class
@@ -80,17 +82,17 @@ getCurrentUrl = do
 
 getOAuthAccessTokenBySecretOrBroker :: (IsString e, WxppApiBroker a
                                        , HasWxppUrlConfig env, HasWxppUrlConfig env, HasWreqSession env
-                                       , MonadCatch m, MonadIO m, MonadLogger m, MonadError e m
+                                       , ExcSafe.MonadCatch m, MonadIO m, MonadLogger m
                                        )
                                     => env
                                     -> Either WxppAppSecret a
                                     -> WxppAppID
                                     -> OAuthCode
-                                    -> m (Maybe OAuthAccessTokenResult)
+                                    -> ExceptT e m (Maybe OAuthAccessTokenResult)
 getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code = do
   case secret_or_broker of
     Left secret -> do
-      err_or_atk_info <- tryWxppWsResult $
+      err_or_atk_info <- lift $ tryWxppWsResult $
                             flip runReaderT wx_api_env $
                               wxppOAuthGetAccessToken app_id secret code
       case err_or_atk_info of
@@ -124,8 +126,8 @@ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code = do
 
 
 handlerGetQrCodeStateStorage :: (MonadHandler m, HandlerSite m ~ site, YesodAuthWeiXin site)
-                             => m ( Text -> HandlerT site IO (Maybe WxScanQrCodeSess)
-                                  , Text -> WxScanQrCodeSess -> HandlerT site IO ()
+                             => m ( Text -> HandlerOf site (Maybe WxScanQrCodeSess)
+                                  , Text -> WxScanQrCodeSess -> HandlerOf site ()
                                   )
 handlerGetQrCodeStateStorage = do
   master_site <- getYesod
@@ -137,10 +139,10 @@ handlerGetQrCodeStateStorage = do
 
 
 
-handlerGetQrCodeStateStorageAndSession :: ( m ~ HandlerT site IO, YesodAuthWeiXin site)
+handlerGetQrCodeStateStorageAndSession :: ( m ~ HandlerOf site, YesodAuthWeiXin site)
                                        => Text
-                                       -> m ( ( Text -> HandlerT site IO (Maybe WxScanQrCodeSess)
-                                              , Text -> WxScanQrCodeSess -> HandlerT site IO ()
+                                       -> m ( ( Text -> HandlerOf site (Maybe WxScanQrCodeSess)
+                                              , Text -> WxScanQrCodeSess -> HandlerOf site ()
                                               )
                                             , WxScanQrCodeSess
                                             )

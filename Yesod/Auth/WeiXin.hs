@@ -12,6 +12,7 @@ module Yesod.Auth.WeiXin
 -- {{{1
 import           ClassyPrelude.Yesod
 import           Control.Monad.Except hiding (mapM_)
+import           Control.Monad.Logger
 import           Control.Monad.Trans.Maybe
 import           Data.Aeson.Text as A
 import           Data.Time.Clock.POSIX
@@ -20,10 +21,15 @@ import qualified Yesod.Auth.Message          as Msg
 import           Yesod.Core.Types            (HandlerContents (HCError))
 import           Yesod.WebSockets as WS
 
+import Yesod.Compat
 import WeiXin.PublicPlatform
 
 import Yesod.Auth.WeiXin.Class
 import Yesod.Auth.WeiXin.Utils
+
+#if MIN_VERSION_classy_prelude(1, 5, 0)
+import Control.Concurrent (threadDelay)
+#endif
 -- }}}1
 
 
@@ -74,28 +80,36 @@ wxAuthRouteNeedExternalUrl (PluginR _ ["qrcode", "cancel", _sess])  = True
 wxAuthRouteNeedExternalUrl _                                        = False
 
 
+liftToAuthHandler :: HandlerOf master a -> AuthHandler master a
+#if MIN_VERSION_yesod(1, 6, 0)
+liftToAuthHandler = liftHandler
+#else
+liftToAuthHandler = lift
+#endif
+
 -- | 使用微信 union id 机制作为身份认证
 -- 为同时支持微信内、外访问网页，网站必须设置使用 union id，
 -- 而不仅是 open id
 -- 最后生成的 Creds 中的 ident 部分就是一个 union id
-authWeixin :: forall m. YesodAuthWeiXin m
-           => HandlerT m IO [String]
-           -> AuthPlugin m
+authWeixin :: forall master. YesodAuthWeiXin master
+           => HandlerOf master [String]
+           -> AuthPlugin master
 authWeixin get_known_origins =
   AuthPlugin wxAuthPluginName dispatch loginWidget
   where
-    dispatch "GET" ["wxcb", "out" ]             = getLoginCallbackOutR >>= sendResponse
-    dispatch "GET" ["wxcb", "in" ]              = getLoginCallbackInR >>= sendResponse
-    dispatch "GET" ["qrcode", "start" ]         = fmap toTypedContent getLoginQrScanStartR >>= sendResponse
-    dispatch "GET" ["qrcode", "scanned", sess ] = fmap toTypedContent (getLoginQrScanScannedR sess) >>= sendResponse
-    dispatch "GET" ["qrcode", "query", sess]    = fmap toTypedContent (getLoginQrCodeQueryR sess) >>= sendResponse
-    dispatch "POST" ["qrcode", "confirm", sess] = fmap toTypedContent (postLoginQrCodeConfirmR get_known_origins sess) >>= sendResponse
-    dispatch "POST" ["qrcode", "cancel", sess]  = fmap toTypedContent (postLoginQrCodeCancelR get_known_origins sess) >>= sendResponse
-    dispatch "POST" ["qrcode", "ping", sess]    = fmap toTypedContent (postLoginQrCodePingR get_known_origins sess) >>= sendResponse
-    dispatch "GET" ["qrcode", "done", sess ]    = fmap toTypedContent (getLoginQrScanDoneR sess) >>= sendResponse
+    dispatch :: Text -> [Text] -> AuthHandler master TypedContent
+    dispatch "GET" ["wxcb", "out" ]             = getLoginCallbackOutR
+    dispatch "GET" ["wxcb", "in" ]              = getLoginCallbackInR
+    dispatch "GET" ["qrcode", "start" ]         = fmap toTypedContent getLoginQrScanStartR
+    dispatch "GET" ["qrcode", "scanned", sess ] = fmap toTypedContent (getLoginQrScanScannedR sess)
+    dispatch "GET" ["qrcode", "query", sess]    = fmap toTypedContent (getLoginQrCodeQueryR sess)
+    dispatch "POST" ["qrcode", "confirm", sess] = fmap toTypedContent (postLoginQrCodeConfirmR get_known_origins sess)
+    dispatch "POST" ["qrcode", "cancel", sess]  = fmap toTypedContent (postLoginQrCodeCancelR get_known_origins sess)
+    dispatch "POST" ["qrcode", "ping", sess]    = fmap toTypedContent (postLoginQrCodePingR get_known_origins sess)
+    dispatch "GET" ["qrcode", "done", sess ]    = fmap toTypedContent (getLoginQrScanDoneR sess)
     dispatch _ _                                = notFound
 
-    loginWidget :: (Route Auth -> Route m) -> WidgetT m IO ()
+    loginWidget :: (Route Auth -> Route master) -> WidgetOf master
     loginWidget toMaster = do
       in_wx <- isJust <$> handlerGetWeixinClientVersion
       if in_wx
@@ -173,27 +187,25 @@ authWeixinDummy =
                 <button type="submit" .btn .btn-success>_{Msg.LoginTitle}
       |]
 
-getLoginCallbackInR :: YesodAuthWeiXin master
-                    => HandlerT Auth (HandlerT master IO) TypedContent
+getLoginCallbackInR :: YesodAuthWeiXin master => AuthHandler master TypedContent
 getLoginCallbackInR = do
-    lift wxAuthConfigInsideWX >>= getLoginCallbackReal
+  liftToAuthHandler wxAuthConfigInsideWX >>= getLoginCallbackReal
 
-getLoginCallbackOutR :: YesodAuthWeiXin master
-                    => HandlerT Auth (HandlerT master IO) TypedContent
+getLoginCallbackOutR :: YesodAuthWeiXin master => AuthHandler master TypedContent
 getLoginCallbackOutR = do
-  lift wxAuthConfigOutsideWX >>= maybe (permissionDenied "不支持微信外登录") getLoginCallbackReal
+  liftToAuthHandler wxAuthConfigOutsideWX >>= maybe (permissionDenied "不支持微信外登录") getLoginCallbackReal
 
 
 getLoginQrScanStartR :: YesodAuthWeiXin master
-                     => HandlerT Auth (HandlerT master IO) Html
+                     => AuthHandler master Html
 -- {{{1
 getLoginQrScanStartR = do
   neverCache
 
-  master_site <- lift getYesod
+  master_site <- liftToAuthHandler getYesod
   route_to_parent <- getRouteToParent
 
-  (_get_stat, save_stat) <- lift handlerGetQrCodeStateStorage
+  (_get_stat, save_stat) <- liftToAuthHandler handlerGetQrCodeStateStorage
 
   {-
   m_req_union_id0 <- lift $ runInputGet $ iopt textField "req_union_id"
@@ -208,13 +220,13 @@ getLoginQrScanStartR = do
 
   let init_stat = WxScanQrCodeSess req_union_id def def def False
 
-  lift $ save_stat sess init_stat
+  liftToAuthHandler $ save_stat sess init_stat
 
-  render_url <- getUrlRender
-  let scan_url = render_url $ loginQrCodeScannedR sess
-      scan_ttl = wxAuthQrCodeStateTTL master_site
+  liftToAuthHandler $ defaultLayout $ do
+    render_url <- getUrlRender
+    let scan_url = render_url $ route_to_parent $ loginQrCodeScannedR sess
+        scan_ttl = wxAuthQrCodeStateTTL master_site
 
-  lift $ defaultLayout $ do
     setTitle "微信扫码登录"
     addScriptRemote $ "https://cdn.bootcss.com/bootstrap/3.3.7/js/bootstrap.min.js"
     addScriptRemote $ "https://cdn.bootcss.com/jquery.qrcode/1.0/jquery.qrcode.min.js"
@@ -345,14 +357,15 @@ getLoginQrScanStartR = do
 
 
 wxQrCodeLoginQueryWebsocksApp :: YesodAuthWeiXin master
-                              => Text -> WebSocketsT (HandlerT Auth (HandlerT master IO)) ()
+                              => Text
+                              -> WebSocketsT (SubHandlerOf Auth master) ()
 -- {{{1
 wxQrCodeLoginQueryWebsocksApp sess = do
-  repeat_get_status Nothing $$ sinkWSText
+  runConduit $ repeat_get_status Nothing .| sinkWSText
   where
     -- 暂时使用定时查询的方法取数据检查更新
     repeat_get_status m_old = do
-      threadDelay $ 1000 * 1000 * 1
+      liftIO $ threadDelay $ 1000 * 1000 * 1
       st <- lift get_status
       when (fromMaybe True $ (/= st) <$> m_old) $ do
         yield $ A.encodeToLazyText st
@@ -360,7 +373,7 @@ wxQrCodeLoginQueryWebsocksApp sess = do
       repeat_get_status (Just st)
 
     get_status = do
-        (_, sess_dat) <- lift $ lift $ handlerGetQrCodeStateStorageAndSession sess
+        (_, sess_dat) <- lift $ liftToAuthHandler $ handlerGetQrCodeStateStorageAndSession sess
         let (scanned, confirmed) =
               case (wxScanQrCodeSessOpenId &&& wxScanQrCodeSessConfirmed) sess_dat of
                 (Just _, b) -> (True, b)
@@ -374,13 +387,18 @@ wxQrCodeLoginQueryWebsocksApp sess = do
 
 
 getLoginQrCodeQueryR :: YesodAuthWeiXin master
-                     => Text -> HandlerT Auth (HandlerT master IO) Value
+                     => Text -> AuthHandler master Value
 -- {{{1
 getLoginQrCodeQueryR sess = do
-  webSockets $ wxQrCodeLoginQueryWebsocksApp sess
+#if MIN_VERSION_yesod(1, 6, 0)
+  liftSubHandler $
+#else
+  id $
+#endif
+    webSockets $ wxQrCodeLoginQueryWebsocksApp sess
 
   neverCache
-  (_, sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
+  (_, sess_dat) <- liftToAuthHandler $ handlerGetQrCodeStateStorageAndSession sess
 
   let (scanned, confirmed) =
         case (wxScanQrCodeSessOpenId &&& wxScanQrCodeSessConfirmed) sess_dat of
@@ -394,7 +412,7 @@ getLoginQrCodeQueryR sess = do
 -- }}}1
 
 
-addAllowOriginHeader :: HandlerT master IO [String] -> HandlerT master IO ()
+addAllowOriginHeader :: HandlerOf master [String] -> HandlerOf master ()
 -- {{{1
 addAllowOriginHeader get_known_origins = do
   m_origin <- runMaybeT $ do
@@ -408,20 +426,20 @@ addAllowOriginHeader get_known_origins = do
 
 
 ajaxLoginQrCodeConfirmR :: YesodAuthWeiXin master
-                        => HandlerT master IO [String]
+                        => HandlerOf master [String]
                         -> (WxScanQrCodeSess -> WxScanQrCodeSess)
                         -> Text
-                        -> HandlerT Auth (HandlerT master IO) Value
+                        -> AuthHandler master Value
 -- {{{1
 ajaxLoginQrCodeConfirmR get_known_origins update_sess sess = do
   neverCache
-  lift $ addAllowOriginHeader get_known_origins
+  liftToAuthHandler $ addAllowOriginHeader get_known_origins
 
-  (app_id, _secret_or_broker) <- lift $ wxAuthConfigInsideWX
+  (app_id, _secret_or_broker) <- liftToAuthHandler $ wxAuthConfigInsideWX
   expect_open_id <- sessionGetWxppUser app_id
                       >>= maybe (permissionDenied "WX not logged in") return
 
-  ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
+  ((_get_stat, save_stat), sess_dat) <- liftToAuthHandler $ handlerGetQrCodeStateStorageAndSession sess
   case wxScanQrCodeSessOpenId sess_dat of
     Nothing -> permissionDenied "no open id in session"
     Just open_id -> do
@@ -429,16 +447,16 @@ ajaxLoginQrCodeConfirmR get_known_origins update_sess sess = do
          then do
               let sess_dat' = update_sess sess_dat
 
-              lift $ save_stat sess sess_dat'
+              liftToAuthHandler $ save_stat sess sess_dat'
               return $ object []
          else permissionDenied "open_id mismatch"
 -- }}}1
 
 
 postLoginQrCodeConfirmR :: YesodAuthWeiXin master
-                        => HandlerT master IO [String]
+                        => HandlerOf master [String]
                         -> Text
-                        -> HandlerT Auth (HandlerT master IO) Value
+                        -> AuthHandler master Value
 -- {{{1
 postLoginQrCodeConfirmR get_known_origins sess = do
   let update_sess sess_dat = sess_dat { wxScanQrCodeSessConfirmed = True }
@@ -447,9 +465,9 @@ postLoginQrCodeConfirmR get_known_origins sess = do
 
 
 postLoginQrCodeCancelR :: YesodAuthWeiXin master
-                       => HandlerT master IO [String]
+                       => HandlerOf master [String]
                        -> Text
-                       -> HandlerT Auth (HandlerT master IO) Value
+                       -> AuthHandler master Value
 -- {{{1
 postLoginQrCodeCancelR get_known_origins sess = do
   let update_sess sess_dat =
@@ -464,8 +482,8 @@ postLoginQrCodeCancelR get_known_origins sess = do
 
 
 postLoginQrCodePingR :: YesodAuthWeiXin master
-                     => HandlerT master IO [String]
-                     -> Text -> HandlerT Auth (HandlerT master IO) Value
+                     => HandlerOf master [String]
+                     -> Text -> AuthHandler master Value
 -- {{{1
 postLoginQrCodePingR get_known_origins sess = do
   now_int <- liftIO $ fmap round $ getPOSIXTime
@@ -476,46 +494,53 @@ postLoginQrCodePingR get_known_origins sess = do
 
 
 wxQrCodeLoginScannedWebsocksApp :: YesodAuthWeiXin master
-                                => Text -> WebSocketsT (HandlerT Auth (HandlerT master IO)) ()
+                                => Text -> WebSocketsT (SubHandlerOf Auth master) ()
 -- {{{1
 wxQrCodeLoginScannedWebsocksApp sess = do
   let update_sess_time = do
-        ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
+        ((_get_stat, save_stat), sess_dat) <- handlerGetQrCodeStateStorageAndSession sess
         now_int <- liftIO $ fmap round $ getPOSIXTime
         let sess_dat' = sess_dat { wxScanQrCodeSessScanTime = Just now_int }
 
-        lift $ save_stat sess sess_dat'
+        save_stat sess sess_dat'
 
-  let handle_msg = awaitForever $ \ (_ :: Text) -> lift $ lift update_sess_time
+  let handle_msg = awaitForever $ \ (_ :: Text) -> lift $ lift $ liftToAuthHandler update_sess_time
 
-  sourceWS $$ handle_msg
+  runConduit $ sourceWS .| handle_msg
 -- }}}1
 
 
 -- | 微信内打开的页面. 扫描二维码后显示
 getLoginQrScanScannedR :: forall master. YesodAuthWeiXin master
-                       => Text -> HandlerT Auth (HandlerT master IO) Html
+                       => Text
+                       -> AuthHandler master Html
 -- {{{1
 getLoginQrScanScannedR sess = do
-  webSockets $ wxQrCodeLoginScannedWebsocksApp sess
+#if MIN_VERSION_yesod(1, 6, 0)
+  liftSubHandler $
+#else
+  id $
+#endif
+    webSockets $ wxQrCodeLoginScannedWebsocksApp sess
 
   neverCache
 
   is_client_wx <- isJust <$> handlerGetWeixinClientVersion
   unless is_client_wx $ permissionDenied "must in WeiXin"
 
-  ((_get_stat, save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
-  (app_id, secret_or_broker) <- lift $ wxAuthConfigInsideWX
+  ((_get_stat, save_stat), sess_dat) <- liftToAuthHandler $ handlerGetQrCodeStateStorageAndSession sess
+  (app_id, secret_or_broker) <- liftToAuthHandler $ wxAuthConfigInsideWX
 
-  wx_api_env <- lift wxAuthConfigApiEnv
+  wx_api_env <- liftToAuthHandler wxAuthConfigApiEnv
+  log_func <- liftToAuthHandler askLoggerIO
   let scope = if wxScanQrCodeSessReqUnionId sess_dat then AS_SnsApiUserInfo else AS_SnsApiBase
       cache = FakeWxppCache
 
   let get_atk app_id0 code = do
-        runExceptT $ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id0 code
+        liftIO $ flip runLoggingT log_func $ runExceptT $ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id0 code
 
   route_to_parent <- getRouteToParent
-  lift $ yesodComeBackWithWxLogin'
+  liftToAuthHandler $ yesodComeBackWithWxLogin'
    wx_api_env
    cache
    get_atk
@@ -661,18 +686,17 @@ getLoginQrScanScannedR sess = do
         |]
   where
     abort_with_msg msg = do
-      throwM $ userError msg
+      throwIO $ userError msg
 
     get_open_id_failed = abort_with_msg "failed to get open id"
 -- }}}1
 
 
-getLoginQrScanDoneR :: YesodAuthWeiXin master
-                    => Text -> HandlerT Auth (HandlerT master IO) TypedContent
+getLoginQrScanDoneR :: YesodAuthWeiXin master => Text -> AuthHandler master TypedContent
 -- {{{1
 getLoginQrScanDoneR sess = do
-  app_id <- lift $ fmap fst $ wxAuthConfigInsideWX
-  ((_get_stat, _save_stat), sess_dat) <- lift $ handlerGetQrCodeStateStorageAndSession sess
+  app_id <- liftToAuthHandler $ fmap fst $ wxAuthConfigInsideWX
+  ((_get_stat, _save_stat), sess_dat) <- liftToAuthHandler $ handlerGetQrCodeStateStorageAndSession sess
 
   let (m_open_id, m_union_id) = (wxScanQrCodeSessOpenId &&& wxScanQrCodeSessUnionId) sess_dat
 
@@ -682,28 +706,28 @@ getLoginQrScanDoneR sess = do
 
   ident <- case m_union_id of
             Nothing -> do
-              m_union_id2 <- lift $ wxAuthLookupUnionIdByOpenId app_id open_id
+              m_union_id2 <- liftToAuthHandler $ wxAuthLookupUnionIdByOpenId app_id open_id
               case m_union_id2 of
                 Just x -> return $ unWxppUnionID x
                 Nothing -> do
                   $logErrorS logSource "No Union Id available"
-                  throwM $ HCError $ InternalError "微信服务配置错误，请稍后重试"
+                  throwIO $ HCError $ InternalError "微信服务配置错误，请稍后重试"
 
             Just uid -> return $ unWxppUnionID uid
 
   sessionMarkWxppUser app_id open_id m_union_id
-  lift $ setCredsRedirect (Creds wxAuthPluginName ident [])
+  liftToAuthHandler $ setCredsRedirect (Creds wxAuthPluginName ident [])
 
   where
     abort_with_msg msg = do
       $logErrorS logSource $ "WX QR code login failed: " <> msg
-      throwM $ userError $ unpack msg
+      throwIO $ userError $ unpack msg
 -- }}}1
 
 
 getLoginCallbackReal :: YesodAuthWeiXin master
                      => WxOAuthConfig
-                     -> HandlerT Auth (HandlerT master IO) TypedContent
+                     -> AuthHandler master TypedContent
 -- {{{1
 getLoginCallbackReal (app_id, secret_or_broker) = do
     m_code <- fmap OAuthCode <$> lookupGetParam "code"
@@ -718,8 +742,11 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
     case m_code of
         Just code | not (deniedOAuthCode code) -> do
             -- 用户同意授权
-            wx_api_env <- lift wxAuthConfigApiEnv
-            err_or_atk_info <- runExceptT $ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code
+            wx_api_env <- liftToAuthHandler wxAuthConfigApiEnv
+            log_func <- liftToAuthHandler askLoggerIO
+            err_or_atk_info <- liftIO $ flip runLoggingT log_func $ runExceptT $
+                                  getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id code
+
             atk_info <- case err_or_atk_info of
                           Right (Just x) -> return x
                           Right Nothing -> do
@@ -729,7 +756,7 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
                           Left err -> do
                             $logErrorS logSource $
                                 "wxppOAuthGetAccessToken failed: " <> fromString err
-                            throwM $ HCError $ InternalError "微信服务接口错误，请稍后重试"
+                            throwIO $ HCError $ InternalError "微信服务接口错误，请稍后重试"
 
             let open_id = oauthAtkOpenID atk_info
                 scopes  = oauthAtkScopes atk_info
@@ -739,7 +766,9 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
                 get_union_id2 = do
                   guard $ any oauthScopeCanGetUserInfo scopes
 
-                  err_or_oauth_user_info <- tryWxppWsResult $ flip runReaderT wx_api_env $ wxppOAuthGetUserInfo' atk_p
+                  err_or_oauth_user_info <- liftIO $ flip runLoggingT log_func $ tryWxppWsResult $
+                                              flip runReaderT wx_api_env $ wxppOAuthGetUserInfo' atk_p
+
                   case err_or_oauth_user_info of
                     Left err -> do $logErrorS wxppLogSource $ "wxppOAuthGetUserInfo' failed: " <> tshow err
                                    mzero
@@ -752,11 +781,11 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
             ident <- case m_union_id of
                       Nothing -> do
                         $logErrorS logSource "No Union Id available"
-                        throwM $ HCError $ InternalError "微信服务配置错误，请稍后重试"
+                        throwIO $ HCError $ InternalError "微信服务配置错误，请稍后重试"
                       Just uid -> return $ unWxppUnionID uid
 
             sessionMarkWxppUser app_id open_id m_union_id
-            lift $ setCredsRedirect (Creds wxAuthPluginName ident [])
+            liftToAuthHandler $ setCredsRedirect (Creds wxAuthPluginName ident [])
 
         _ -> do
             permissionDenied "用户拒绝授权"
@@ -764,11 +793,11 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
 
 
 postLoginDummyR :: (YesodAuth master, RenderMessage master FormMessage)
-                  => HandlerT Auth (HandlerT master IO) TypedContent
-postLoginDummyR = do
-  union_id0 <- lift $ runInputPost $ do
+                  => AuthHandler master TypedContent
+postLoginDummyR = liftToAuthHandler $ do
+  union_id0 <- runInputPost $ do
                               ireq textField "union_id"
-  lift $ setCredsRedirect (Creds wxAuthDummyPluginName union_id0 [])
+  setCredsRedirect (Creds wxAuthDummyPluginName union_id0 [])
 
 
 -- vim: set foldmethod=marker:
