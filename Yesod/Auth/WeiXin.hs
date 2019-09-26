@@ -228,8 +228,10 @@ getLoginQrScanStartR = do
         scan_ttl = wxAuthQrCodeStateTTL master_site
 
     setTitle "微信扫码登录"
-    addScriptRemote $ "https://cdn.bootcss.com/bootstrap/3.3.7/js/bootstrap.min.js"
-    addScriptRemote $ "https://cdn.bootcss.com/jquery.qrcode/1.0/jquery.qrcode.min.js"
+
+    liftMonadHandler wxAuthBootstrapJsUrl >>= addScriptRemote
+    liftMonadHandler wxAuthJqueryQrcodeJsUrl >>= addScriptRemote
+
     toWidget [julius|
       var page_load_time = new Date();
       var repeat_id = null;
@@ -540,15 +542,16 @@ getLoginQrScanScannedR sess = do
         liftIO $ flip runLoggingT log_func $ runExceptT $ getOAuthAccessTokenBySecretOrBroker wx_api_env secret_or_broker app_id0 code
 
   route_to_parent <- getRouteToParent
-  liftToAuthHandler $ yesodComeBackWithWxLogin'
-   wx_api_env
-   cache
-   get_atk
-   wxAuthConfigFixReturnUrl
-   scope
-   app_id
-   get_open_id_failed
-   $ \ open_id m_union_id _m_sns_uinfo -> do
+  liftToAuthHandler $ wxAuthScannedPageFixup $
+    yesodComeBackWithWxLogin'
+     wx_api_env
+     cache
+     get_atk
+     wxAuthConfigFixReturnUrl
+     scope
+     app_id
+     get_open_id_failed
+     $ \ open_id m_union_id _m_sns_uinfo -> do
       case m_union_id of
         Nothing | wxScanQrCodeSessReqUnionId sess_dat -> abort_with_msg "no union_id"
         _ -> return ()
@@ -573,7 +576,7 @@ getLoginQrScanScannedR sess = do
 
       defaultLayout $ do
         addScriptRemote $ unUrlText wxppJsSDKUrl
-        addScriptRemote $ "https://cdn.bootcss.com/bootstrap/3.3.7/js/bootstrap.min.js"
+        liftMonadHandler wxAuthBootstrapJsUrl >>= addScriptRemote
 
         toWidget [julius|
           ^{js_sdk_config_code}

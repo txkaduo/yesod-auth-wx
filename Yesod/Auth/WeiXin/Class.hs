@@ -66,3 +66,14 @@ class (YesodAuth site) => YesodAuthWeiXin site where
   wxAuthLookupUnionIdByOpenId :: WxppAppID
                               -> WxppOpenID
                               -> HandlerOf site (Maybe WxppUnionID)
+
+  wxAuthBootstrapJsUrl :: HandlerOf site Text
+  wxAuthBootstrapJsUrl = return "https://cdn.bootcss.com/bootstrap/3.3.7/js/bootstrap.min.js"
+
+  wxAuthJqueryQrcodeJsUrl :: HandlerOf site Text
+  wxAuthJqueryQrcodeJsUrl = return "https://cdn.bootcss.com/jquery.qrcode/1.0/jquery.qrcode.min.js"
+
+  -- | 有时候，显示给用户扫码打开的页面要特别处理一下
+  -- 其实就是要把 approot 替换一下，以适应开发测试环境
+  wxAuthScannedPageFixup :: HandlerOf site Html -> HandlerOf site Html
+  wxAuthScannedPageFixup = id
