@@ -91,7 +91,7 @@ liftToAuthHandler = lift
 -- 为同时支持微信内、外访问网页，网站必须设置使用 union id，
 -- 而不仅是 open id
 -- 最后生成的 Creds 中的 ident 部分就是一个 union id
-authWeixin :: forall master. (YesodAuthWeiXin master, MonadFail (HandlerOf master))
+authWeixin :: forall master. (YesodAuthWeiXin master)
            => HandlerOf master [String]
            -> AuthPlugin master
 authWeixin get_known_origins =
@@ -513,7 +513,7 @@ wxQrCodeLoginScannedWebsocksApp sess = do
 
 
 -- | 微信内打开的页面. 扫描二维码后显示
-getLoginQrScanScannedR :: forall master. (YesodAuthWeiXin master, MonadFail (HandlerOf master))
+getLoginQrScanScannedR :: forall master. (YesodAuthWeiXin master)
                        => Text
                        -> AuthHandler master Html
 -- {{{1
