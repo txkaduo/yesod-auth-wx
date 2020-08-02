@@ -736,7 +736,7 @@ getLoginCallbackReal (app_id, secret_or_broker) = do
     m_code <- fmap OAuthCode <$> lookupGetParam "code"
 
     oauth_state <- liftM (fromMaybe "") $ lookupGetParam "state"
-    m_expected_state <- lookupSession (sessionKeyWxppOAuthState app_id)
+    m_expected_state <- lookupCookie (cookieNameWxppOAuthState app_id)
     unless (m_expected_state == Just oauth_state) $ do
         $logErrorS logSource $
             "OAuth state check failed, got: " <> oauth_state
