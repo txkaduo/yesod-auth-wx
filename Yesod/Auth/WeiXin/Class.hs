@@ -1,6 +1,7 @@
 module Yesod.Auth.WeiXin.Class where
 
-import           ClassyPrelude.Yesod
+import           ClassyPrelude
+import           Yesod
 import           Data.Aeson.TH                 (deriveJSON, fieldLabelModifier, defaultOptions)
 import           Data.Aeson.Types              (camelTo2)
 import           WeiXin.PublicPlatform

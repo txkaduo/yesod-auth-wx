@@ -10,7 +10,10 @@ module Yesod.Auth.WeiXin
   ) where
 
 -- {{{1
-import           ClassyPrelude.Yesod
+import           ClassyPrelude
+import           Yesod
+import           Data.Conduit
+import           Data.Default (Default(..))
 import           Control.Monad.Except hiding (mapM_)
 import           Control.Monad.Logger
 import           Control.Monad.Trans.Maybe

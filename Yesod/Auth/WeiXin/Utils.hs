@@ -1,6 +1,7 @@
 module Yesod.Auth.WeiXin.Utils where
 
-import           ClassyPrelude.Yesod
+import           ClassyPrelude
+import           Yesod
 import           Control.Monad.Except hiding (replicateM)
 import           Data.List                  ((!!))
 import           Network.Wai                (rawQueryString)

@@ -41,7 +41,8 @@ library
                      , yesod-auth
                      , yesod-core
                      , classy-prelude
-                     , classy-prelude-yesod
+                     , data-default
+                     , conduit
                      , transformers
                      , mtl
                      , wreq
