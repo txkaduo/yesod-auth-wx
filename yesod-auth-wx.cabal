@@ -35,6 +35,7 @@ library
                        RankNTypes
                        CPP
                        ConstraintKinds
+                       TypeOperators
 
   build-depends:       base >=4.8 && <5
                      , yesod
